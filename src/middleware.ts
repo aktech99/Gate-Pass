@@ -4,11 +4,11 @@ import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
   const authData = request.cookies.get('auth-storage')?.value;
-  
+
   // Parse the auth data if it exists
   let token = null;
   let user = null;
-  
+
   if (authData) {
     try {
       const parsedAuth = JSON.parse(decodeURIComponent(authData));
@@ -23,7 +23,9 @@ export function middleware(request: NextRequest) {
 
   // Public routes that don't require authentication
   const publicRoutes = ['/login', '/register', '/'];
-  const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
+  const isPublicRoute = publicRoutes.some((route) =>
+    pathname.startsWith(route),
+  );
 
   // If no token and trying to access protected route
   if (!token && !isPublicRoute) {
@@ -31,7 +33,11 @@ export function middleware(request: NextRequest) {
   }
 
   // If has token and trying to access login/register, redirect to appropriate dashboard
-  if (token && user && (pathname.startsWith('/login') || pathname.startsWith('/register'))) {
+  if (
+    token &&
+    user &&
+    (pathname.startsWith('/login') || pathname.startsWith('/register'))
+  ) {
     const dashboardUrl = getRoleDashboard(user.role);
     return NextResponse.redirect(new URL(dashboardUrl, request.url));
   }
@@ -39,7 +45,7 @@ export function middleware(request: NextRequest) {
   // Role-based route protection
   if (token && user) {
     const userRole = user.role;
-    
+
     // Admin routes
     if (pathname.startsWith('/admin') && userRole !== 'SUPER_ADMIN') {
       const dashboardUrl = getRoleDashboard(userRole);
@@ -90,7 +96,5 @@ function getRoleDashboard(role: string): string {
 }
 
 export const config = {
-  matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|health).*)',
-  ],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|health).*)'],
 };
