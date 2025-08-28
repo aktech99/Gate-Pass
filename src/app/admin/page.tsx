@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth';
+import { useAuth, getStoredAuthData } from '@/lib/auth';
+import { Layout } from '@/components/Layout';
 import {
   Card,
   CardHeader,
@@ -54,28 +55,107 @@ export default function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [newRole, setNewRole] = useState<string>('');
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // Get auth data with fallback
+  const getAuthData = () => {
+    if (token && user) {
+      return { token, user };
+    }
+    return getStoredAuthData();
+  };
 
-  const fetchData = async () => {
+  const { token: authToken, user: authUser } = getAuthData();
+
+  useEffect(() => {
+    console.log('Admin Dashboard - Auth Token:', !!authToken);
+    console.log('Admin Dashboard - User:', authUser?.email);
+  }, [authToken, authUser]);
+
+  const fetchData = async (): Promise<void> => {
     try {
+      if (!authToken) {
+        console.error('No auth token available');
+        setLoading(false);
+        return;
+      }
+
+      // Debug the API calls
+      console.log('Making admin API calls...');
+
       const [pendingRes, allUsersRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/teachers/pending`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+        }).catch((err) => {
+          console.error('Pending teachers API error:', err);
+          return { ok: false, status: 500 };
         }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/teachers`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+        }).catch((err) => {
+          console.error('All users API error:', err);
+          return { ok: false, status: 500 };
         }),
       ]);
 
-      const pendingData = await pendingRes.json();
-      const allUsersData = await allUsersRes.json();
+      console.log('Pending API response status:', pendingRes.status);
+      console.log('All users API response status:', allUsersRes.status);
 
-      setPendingTeachers(pendingData);
-      setAllUsers(allUsersData);
+      if (
+        pendingRes.ok &&
+        typeof (pendingRes as Response).json === 'function'
+      ) {
+        const pendingData: PendingTeacher[] = await (
+          pendingRes as Response
+        ).json();
+        console.log('Pending teachers data:', pendingData);
+        setPendingTeachers(Array.isArray(pendingData) ? pendingData : []);
+      } else {
+        let errorText = 'Network error';
+        if (
+          pendingRes.status !== 500 &&
+          typeof (pendingRes as Response).text === 'function'
+        ) {
+          errorText = await (pendingRes as Response).text();
+        }
+        console.error(
+          'Failed to fetch pending teachers:',
+          pendingRes.status,
+          errorText,
+        );
+        setPendingTeachers([]);
+      }
+
+      if (
+        allUsersRes.ok &&
+        typeof (allUsersRes as Response).json === 'function'
+      ) {
+        const allUsersData: AllUser[] = await (allUsersRes as Response).json();
+        console.log('All users data:', allUsersData);
+        setAllUsers(Array.isArray(allUsersData) ? allUsersData : []);
+      } else {
+        let errorText = 'Network error';
+        if (
+          allUsersRes.status !== 500 &&
+          typeof (allUsersRes as Response).text === 'function'
+        ) {
+          errorText = await (allUsersRes as Response).text();
+        }
+        console.error(
+          'Failed to fetch all users:',
+          allUsersRes.status,
+          errorText,
+        );
+        setAllUsers([]);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
+      setPendingTeachers([]);
+      setAllUsers([]);
     } finally {
       setLoading(false);
     }
@@ -88,13 +168,16 @@ export default function AdminDashboard() {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
           },
         },
       );
 
       if (res.ok) {
         fetchData();
+      } else {
+        console.error('Failed to approve teacher:', res.status);
       }
     } catch (error) {
       console.error('Error approving teacher:', error);
@@ -108,13 +191,16 @@ export default function AdminDashboard() {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
           },
         },
       );
 
       if (res.ok) {
         fetchData();
+      } else {
+        console.error('Failed to reject teacher:', res.status);
       }
     } catch (error) {
       console.error('Error rejecting teacher:', error);
@@ -129,7 +215,7 @@ export default function AdminDashboard() {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({ role: newRole }),
         },
@@ -139,6 +225,8 @@ export default function AdminDashboard() {
         setSelectedUser(null);
         setNewRole('');
         fetchData();
+      } else {
+        console.error('Failed to change role:', res.status);
       }
     } catch (error) {
       console.error('Error changing role:', error);
@@ -161,8 +249,6 @@ export default function AdminDashboard() {
   };
 
   const getRoleBadge = (role: string, isApproved: boolean) => {
-    const baseClasses = 'flex items-center gap-1';
-
     if (!isApproved && role !== 'STUDENT') {
       return (
         <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
@@ -223,253 +309,276 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="grid gap-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="mb-2 h-4 w-3/4 rounded bg-gray-200"></div>
-                <div className="h-3 w-1/2 rounded bg-gray-200"></div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="container mx-auto p-6">
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <p className="text-muted-foreground">
-            Manage users and system settings
-          </p>
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-blue-600" />
-            <div>
-              <p className="text-2xl font-bold">{userStats.total}</p>
-              <p className="text-muted-foreground text-sm">Total Users</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <GraduationCap className="h-5 w-5 text-green-600" />
-            <div>
-              <p className="text-2xl font-bold">{userStats.students}</p>
-              <p className="text-muted-foreground text-sm">Students</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <User className="h-5 w-5 text-blue-600" />
-            <div>
-              <p className="text-2xl font-bold">{userStats.teachers}</p>
-              <p className="text-muted-foreground text-sm">Teachers</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-orange-600" />
-            <div>
-              <p className="text-2xl font-bold">{userStats.security}</p>
-              <p className="text-muted-foreground text-sm">Security</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="flex items-center gap-2">
-            <Clock className="h-5 w-5 text-yellow-600" />
-            <div>
-              <p className="text-2xl font-bold">{userStats.pending}</p>
-              <p className="text-muted-foreground text-sm">Pending</p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="pending" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="pending">
-            Pending Approvals ({pendingTeachers.length})
-          </TabsTrigger>
-          <TabsTrigger value="users">All Users ({allUsers.length})</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="pending">
+      <Layout title="Admin Dashboard">
+        <div className="container mx-auto p-6">
           <div className="grid gap-4">
-            {pendingTeachers.length === 0 ? (
-              <Card>
-                <CardContent className="py-8 text-center">
-                  <UserCheck className="mx-auto mb-4 h-12 w-12 text-gray-400" />
-                  <h3 className="mb-2 text-lg font-semibold">
-                    No Pending Approvals
-                  </h3>
-                  <p className="text-muted-foreground">
-                    All teacher registrations have been processed.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              pendingTeachers.map((teacher) => (
-                <Card key={teacher.id}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-lg">
-                          {teacher.name}
-                        </CardTitle>
-                        <CardDescription>{teacher.email}</CardDescription>
-                      </div>
-                      <Badge
-                        variant="secondary"
-                        className="bg-yellow-100 text-yellow-800"
-                      >
-                        <Clock className="mr-1 h-3 w-3" />
-                        Pending Approval
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground text-sm">
-                        Registered: {format(new Date(teacher.createdAt), 'PPp')}
-                      </span>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => handleApproveTeacher(teacher.id)}
-                          className="bg-green-600 hover:bg-green-700"
-                        >
-                          <UserCheck className="mr-1 h-4 w-4" />
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => handleRejectTeacher(teacher.id)}
-                        >
-                          <UserX className="mr-1 h-4 w-4" />
-                          Reject
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="users">
-          <div className="grid gap-4">
-            {allUsers.map((user) => (
-              <Card key={user.id}>
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{user.name}</CardTitle>
-                      <CardDescription>{user.email}</CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {getRoleBadge(user.role, user.isApproved)}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedUser(user.id);
-                          setNewRole(user.role);
-                        }}
-                      >
-                        Change Role
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-muted-foreground text-sm">
-                    Joined: {format(new Date(user.createdAt), 'PPp')}
-                  </span>
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-6">
+                  <div className="mb-2 h-4 w-3/4 rounded bg-gray-200"></div>
+                  <div className="h-3 w-1/2 rounded bg-gray-200"></div>
                 </CardContent>
               </Card>
             ))}
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </Layout>
+    );
+  }
 
-      {/* Role Change Modal */}
-      {selectedUser && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Change User Role</CardTitle>
-              <CardDescription>Select a new role for the user</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Select value={newRole} onValueChange={setNewRole}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="STUDENT">
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      Student
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="TEACHER">
-                    <div className="flex items-center gap-2">
-                      <GraduationCap className="h-4 w-4" />
-                      Teacher
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="SECURITY">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4" />
-                      Security
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="SUPER_ADMIN">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4" />
-                      Super Admin
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CardContent>
-            <CardContent className="flex gap-2">
-              <Button
-                className="flex-1"
-                onClick={() => handleRoleChange(selectedUser, newRole)}
-                disabled={!newRole}
-              >
-                Update Role
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSelectedUser(null);
-                  setNewRole('');
-                }}
-              >
-                Cancel
-              </Button>
-            </CardContent>
+  return (
+    <Layout title="Admin Dashboard">
+      <div className="container mx-auto p-6">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Welcome, {authUser?.name}</h1>
+            <p className="text-muted-foreground">
+              Manage users and system settings
+            </p>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
+          <Card className="p-4">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-blue-600" />
+              <div>
+                <p className="text-2xl font-bold">{userStats.total}</p>
+                <p className="text-muted-foreground text-sm">Total Users</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-green-600" />
+              <div>
+                <p className="text-2xl font-bold">{userStats.students}</p>
+                <p className="text-muted-foreground text-sm">Students</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-2">
+              <User className="h-5 w-5 text-blue-600" />
+              <div>
+                <p className="text-2xl font-bold">{userStats.teachers}</p>
+                <p className="text-muted-foreground text-sm">Teachers</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-2">
+              <Shield className="h-5 w-5 text-orange-600" />
+              <div>
+                <p className="text-2xl font-bold">{userStats.security}</p>
+                <p className="text-muted-foreground text-sm">Security</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-4">
+            <div className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-yellow-600" />
+              <div>
+                <p className="text-2xl font-bold">{userStats.pending}</p>
+                <p className="text-muted-foreground text-sm">Pending</p>
+              </div>
+            </div>
           </Card>
         </div>
-      )}
-    </div>
+
+        <Tabs defaultValue="pending" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="pending">
+              Pending Approvals ({pendingTeachers.length})
+            </TabsTrigger>
+            <TabsTrigger value="users">
+              All Users ({allUsers.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="pending">
+            <div className="grid gap-4">
+              {pendingTeachers.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <UserCheck className="mx-auto mb-4 h-12 w-12 text-gray-400" />
+                    <h3 className="mb-2 text-lg font-semibold">
+                      No Pending Approvals
+                    </h3>
+                    <p className="text-muted-foreground">
+                      All teacher registrations have been processed.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                pendingTeachers.map((teacher) => (
+                  <Card key={teacher.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">
+                            {teacher.name}
+                          </CardTitle>
+                          <CardDescription>{teacher.email}</CardDescription>
+                        </div>
+                        <Badge
+                          variant="secondary"
+                          className="bg-yellow-100 text-yellow-800"
+                        >
+                          <Clock className="mr-1 h-3 w-3" />
+                          Pending Approval
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground text-sm">
+                          Registered:{' '}
+                          {format(new Date(teacher.createdAt), 'PPp')}
+                        </span>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleApproveTeacher(teacher.id)}
+                            className="bg-green-600 hover:bg-green-700"
+                          >
+                            <UserCheck className="mr-1 h-4 w-4" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleRejectTeacher(teacher.id)}
+                          >
+                            <UserX className="mr-1 h-4 w-4" />
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="users">
+            <div className="grid gap-4">
+              {allUsers.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <Users className="mx-auto mb-4 h-12 w-12 text-gray-400" />
+                    <h3 className="mb-2 text-lg font-semibold">
+                      No Users Found
+                    </h3>
+                    <p className="text-muted-foreground">
+                      No users are currently registered in the system.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                allUsers.map((user) => (
+                  <Card key={user.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{user.name}</CardTitle>
+                          <CardDescription>{user.email}</CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {getRoleBadge(user.role, user.isApproved)}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedUser(user.id);
+                              setNewRole(user.role);
+                            }}
+                          >
+                            Change Role
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <span className="text-muted-foreground text-sm">
+                        Joined: {format(new Date(user.createdAt), 'PPp')}
+                      </span>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        {/* Role Change Modal */}
+        {selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <Card className="w-full max-w-md">
+              <CardHeader>
+                <CardTitle>Change User Role</CardTitle>
+                <CardDescription>
+                  Select a new role for the user
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Select value={newRole} onValueChange={setNewRole}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="STUDENT">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        Student
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="TEACHER">
+                      <div className="flex items-center gap-2">
+                        <GraduationCap className="h-4 w-4" />
+                        Teacher
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="SECURITY">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        Security
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="SUPER_ADMIN">
+                      <div className="flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        Super Admin
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </CardContent>
+              <CardContent className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => handleRoleChange(selectedUser, newRole)}
+                  disabled={!newRole}
+                >
+                  Update Role
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedUser(null);
+                    setNewRole('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </Layout>
   );
 }

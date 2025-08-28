@@ -11,13 +11,6 @@ import {
   CardContent,
   CardFooter,
 } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useAuth } from '@/lib/auth';
 
 export default function RegisterPage() {
@@ -26,9 +19,9 @@ export default function RegisterPage() {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
+    rollNo: '',
     password: '',
     confirmPassword: '',
-    role: 'STUDENT',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -53,21 +46,20 @@ export default function RegisterPage() {
     }
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/auth/register`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: formData.name,
-            email: formData.email,
-            password: formData.password,
-            role: formData.role,
-          }),
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+      const res = await fetch(`${apiUrl}/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      );
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          rollNo: formData.rollNo,
+          password: formData.password,
+        }),
+      });
 
       const data = await res.json();
 
@@ -75,17 +67,25 @@ export default function RegisterPage() {
         throw new Error(data.message);
       }
 
-      // For students, auto-login. For teachers, show approval message
-      if (formData.role === 'STUDENT') {
-        setAuth(data.token, data.user);
-        router.push('/student');
+      // Auto-login and redirect to student dashboard
+      setAuth(data.token, data.user);
+      router.push('/student');
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error('Registration error:', error);
+        setError(
+          error instanceof Error ? error.message : 'Registration failed',
+        );
       } else {
-        // Redirect to login with success message for teachers/security
-        router.push('/login?message=registration-pending');
+        console.error('Unknown registration error:', error);
+        setError('Registration failed');
       }
-    } catch (error: any) {
       console.error('Registration error:', error);
-      setError(error.message || 'Registration failed');
+      setError(
+        error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : 'Registration failed',
+      );
     } finally {
       setLoading(false);
     }
@@ -93,11 +93,11 @@ export default function RegisterPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <Card className="w-[450px]">
+      <Card className="w-[400px]">
         <CardHeader>
           <h2 className="text-center text-2xl font-bold">Create Account</h2>
           <p className="text-muted-foreground text-center text-sm">
-            Join the Gate Pass Management System
+            Join as a student - admin will assign roles later
           </p>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -125,6 +125,22 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-2">
+              <label htmlFor="rollNo" className="text-sm font-medium">
+                Roll Number *
+              </label>
+              <Input
+                id="rollNo"
+                type="text"
+                required
+                placeholder="Enter your roll number"
+                value={formData.rollNo}
+                onChange={(e) =>
+                  setFormData({ ...formData, rollNo: e.target.value })
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
               <label htmlFor="email" className="text-sm font-medium">
                 Email Address *
               </label>
@@ -138,32 +154,6 @@ export default function RegisterPage() {
                   setFormData({ ...formData, email: e.target.value })
                 }
               />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="role" className="text-sm font-medium">
-                Role *
-              </label>
-              <Select
-                value={formData.role}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, role: value })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select your role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="STUDENT">Student</SelectItem>
-                  <SelectItem value="TEACHER">Teacher</SelectItem>
-                  <SelectItem value="SECURITY">Security Personnel</SelectItem>
-                </SelectContent>
-              </Select>
-              {formData.role !== 'STUDENT' && (
-                <p className="text-muted-foreground text-xs">
-                  Note: Teacher and Security accounts require admin approval
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">

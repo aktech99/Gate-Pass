@@ -7,14 +7,12 @@ interface QRCodeDisplayProps {
   value: string;
   size?: number;
   level?: 'L' | 'M' | 'Q' | 'H';
-  includeMargin?: boolean;
 }
 
 export function QRCodeDisplay({
   value,
   size = 256,
   level = 'M',
-  includeMargin = true,
 }: QRCodeDisplayProps) {
   return (
     <div className="flex flex-col items-center justify-center p-4">
@@ -23,7 +21,6 @@ export function QRCodeDisplay({
           value={value}
           size={size}
           level={level}
-          includeMargin={includeMargin}
           style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
         />
       </div>

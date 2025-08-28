@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth';
+import { useAuth, getStoredAuthData } from '@/lib/auth';
 import { Layout } from '@/components/Layout';
 import {
   Card,
@@ -60,46 +60,100 @@ export default function StudentDashboard() {
     teacherId: '',
   });
 
+  // Get auth data with fallback
+  const getAuthData = () => {
+    if (token && user) {
+      return { token, user };
+    }
+    // Fallback to manual extraction
+    return getStoredAuthData();
+  };
+
+  const { token: authToken, user: authUser } = getAuthData();
+
+  // Debug auth state
   useEffect(() => {
-    fetchPasses();
-    fetchTeachers();
-  }, []);
+    console.log('Auth State Debug:');
+    console.log('Zustand Token:', !!token);
+    console.log('Stored Token:', !!getStoredAuthData().token);
+    console.log('Final Token:', !!authToken);
+    console.log('Final User:', authUser?.email);
+  }, [token, authToken, authUser]);
 
   const fetchTeachers = async () => {
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/students/teachers`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      if (!authToken) {
+        console.error('No token for teachers fetch');
+        return;
+      }
+
+      const apiUrl = 'http://localhost:3001/api';
+      const res = await fetch(`${apiUrl}/students/teachers`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
         },
-      );
-      const data = await res.json();
-      setTeachers(data);
+      });
+
+      console.log('Teachers fetch status:', res.status);
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Teachers data:', data);
+        setTeachers(Array.isArray(data) ? data : []);
+      } else {
+        const errorData = await res.text();
+        console.error('Failed to fetch teachers:', res.status, errorData);
+        setTeachers([]);
+      }
     } catch (error) {
       console.error('Error fetching teachers:', error);
+      setTeachers([]);
     }
   };
 
   const fetchPasses = async () => {
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/gate-pass/student/passes`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      if (!authToken) {
+        console.error('No token found anywhere');
+        setLoading(false);
+        return;
+      }
+
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+      console.log('Using token:', authToken.substring(0, 20) + '...');
+
+      const res = await fetch(`${apiUrl}/gate-pass/student/passes`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
         },
-      );
-      const data = await res.json();
-      setPasses(data);
+      });
+
+      console.log('Response status:', res.status);
+
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Received data:', data);
+        setPasses(Array.isArray(data) ? data : []);
+      } else {
+        const errorData = await res.text();
+        console.error('Failed to fetch passes:', res.status, errorData);
+        setPasses([]);
+      }
     } catch (error) {
       console.error('Error fetching passes:', error);
+      setPasses([]);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchPasses();
+    fetchTeachers();
+  }, [fetchPasses, fetchTeachers]);
 
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,81 +254,23 @@ export default function StudentDashboard() {
 
           <TabsContent value="all">
             <div className="grid gap-4">
-              {passes.map((pass) => (
-                <Card key={pass.id}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-lg">{pass.reason}</CardTitle>
-                        <CardDescription>
-                          Requested: {format(new Date(pass.requestDate), 'PPp')}
-                          {pass.teacher &&
-                            ` • Approved by: ${pass.teacher.name}`}
-                        </CardDescription>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge className={getStatusBadge(pass.status)}>
-                          {getStatusIcon(pass.status)}
-                          <span className="ml-1">{pass.status}</span>
-                        </Badge>
-                        {pass.status === 'APPROVED' && pass.qrCode && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setShowQRCode(pass.qrCode!)}
-                          >
-                            <QrCode className="mr-1 h-4 w-4" />
-                            QR Code
-                          </Button>
-                        )}
-                      </div>
+              {passes.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-200">
+                      <Eye className="h-6 w-6 text-gray-400" />
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="font-medium">Valid Until:</span>
-                        <p className="text-muted-foreground">
-                          {format(new Date(pass.validUntil), 'PPp')}
-                        </p>
-                      </div>
-                      {pass.remarks && (
-                        <div>
-                          <span className="font-medium">Remarks:</span>
-                          <p className="text-muted-foreground">
-                            {pass.remarks}
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                    <h3 className="mb-2 text-lg font-semibold">
+                      No Gate Pass Requests
+                    </h3>
+                    <p className="text-muted-foreground">
+                      You haven&apos;t made any gate pass requests yet. Click
+                      &quot;New Request&quot; to get started.
+                    </p>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="pending">
-            <div className="grid gap-4">
-              {passes
-                .filter((p) => p.status === 'PENDING')
-                .map((pass) => (
-                  <Card key={pass.id}>
-                    <CardHeader>
-                      <CardTitle className="text-lg">{pass.reason}</CardTitle>
-                      <CardDescription>
-                        Requested: {format(new Date(pass.requestDate), 'PPp')}
-                      </CardDescription>
-                    </CardHeader>
-                  </Card>
-                ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="approved">
-            <div className="grid gap-4">
-              {passes
-                .filter((p) => p.status === 'APPROVED')
-                .map((pass) => (
+              ) : (
+                passes.map((pass) => (
                   <Card key={pass.id}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
@@ -283,20 +279,126 @@ export default function StudentDashboard() {
                             {pass.reason}
                           </CardTitle>
                           <CardDescription>
-                            Approved by: {pass.teacher?.name}
+                            Requested:{' '}
+                            {format(new Date(pass.requestDate), 'PPp')}
+                            {pass.teacher &&
+                              ` • Approved by: ${pass.teacher.name}`}
                           </CardDescription>
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={() => setShowQRCode(pass.qrCode!)}
-                        >
-                          <QrCode className="mr-1 h-4 w-4" />
-                          Show QR
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Badge className={getStatusBadge(pass.status)}>
+                            {getStatusIcon(pass.status)}
+                            <span className="ml-1">{pass.status}</span>
+                          </Badge>
+                          {pass.status === 'APPROVED' && pass.qrCode && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setShowQRCode(pass.qrCode!)}
+                            >
+                              <QrCode className="mr-1 h-4 w-4" />
+                              QR Code
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="font-medium">Valid Until:</span>
+                          <p className="text-muted-foreground">
+                            {format(new Date(pass.validUntil), 'PPp')}
+                          </p>
+                        </div>
+                        {pass.remarks && (
+                          <div>
+                            <span className="font-medium">Remarks:</span>
+                            <p className="text-muted-foreground">
+                              {pass.remarks}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
                   </Card>
-                ))}
+                ))
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="pending">
+            <div className="grid gap-4">
+              {passes.filter((p) => p.status === 'PENDING').length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <Clock className="mx-auto mb-4 h-12 w-12 text-gray-400" />
+                    <h3 className="mb-2 text-lg font-semibold">
+                      No Pending Requests
+                    </h3>
+                    <p className="text-muted-foreground">
+                      You don&apos;t have any pending gate pass requests.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                passes
+                  .filter((p) => p.status === 'PENDING')
+                  .map((pass) => (
+                    <Card key={pass.id}>
+                      <CardHeader>
+                        <CardTitle className="text-lg">{pass.reason}</CardTitle>
+                        <CardDescription>
+                          Requested: {format(new Date(pass.requestDate), 'PPp')}
+                        </CardDescription>
+                      </CardHeader>
+                    </Card>
+                  ))
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="approved">
+            <div className="grid gap-4">
+              {passes.filter((p) => p.status === 'APPROVED').length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <CheckCircle className="mx-auto mb-4 h-12 w-12 text-gray-400" />
+                    <h3 className="mb-2 text-lg font-semibold">
+                      No Approved Requests
+                    </h3>
+                    <p className="text-muted-foreground">
+                      You don&apos;t have any approved gate pass requests yet.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                passes
+                  .filter((p) => p.status === 'APPROVED')
+                  .map((pass) => (
+                    <Card key={pass.id}>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-lg">
+                              {pass.reason}
+                            </CardTitle>
+                            <CardDescription>
+                              Approved by: {pass.teacher?.name}
+                            </CardDescription>
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => setShowQRCode(pass.qrCode!)}
+                          >
+                            <QrCode className="mr-1 h-4 w-4" />
+                            Show QR
+                          </Button>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  ))
+              )}
             </div>
           </TabsContent>
         </Tabs>
@@ -386,10 +488,8 @@ export default function StudentDashboard() {
             </Card>
           </div>
         )}
-
-        {/* QR Code Modal */}
         {showQRCode && (
-          <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <Card className="w-full max-w-sm text-center">
               <CardHeader>
                 <CardTitle>Your Gate Pass QR Code</CardTitle>
@@ -400,8 +500,10 @@ export default function StudentDashboard() {
               <CardContent>
                 <QRCodeDisplay value={showQRCode} size={200} />
               </CardContent>
-              <CardContent>
-                <Button onClick={() => setShowQRCode(null)}>Close</Button>
+              <CardContent className="pt-0">
+                <Button onClick={() => setShowQRCode(null)} className="w-full">
+                  Close
+                </Button>
               </CardContent>
             </Card>
           </div>

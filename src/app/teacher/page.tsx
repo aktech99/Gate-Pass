@@ -1,7 +1,8 @@
+// src/app/teacher/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth';
+import { useAuth, getStoredAuthData } from '@/lib/auth';
 import { Layout } from '@/components/Layout';
 import {
   Card,
@@ -56,29 +57,72 @@ export default function TeacherDashboard() {
   const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
   const [remarks, setRemarks] = useState('');
 
+  // Get auth data with fallback
+  const getAuthData = () => {
+    if (token && user) {
+      return { token, user };
+    }
+    return getStoredAuthData();
+  };
+
+  const { token: authToken, user: authUser } = getAuthData();
+
   useEffect(() => {
-    fetchRequests();
-  }, []);
+    console.log('Teacher Dashboard - Auth Token:', !!authToken);
+    console.log('Teacher Dashboard - User:', authUser?.email);
+  }, [authToken, authUser]);
+
+  useEffect(() => {
+    if (authToken && authUser) {
+      fetchRequests();
+
+      // Set up polling for real-time updates every 30 seconds
+      const interval = setInterval(() => {
+        fetchRequests();
+      }, 30000);
+
+      return () => clearInterval(interval);
+    }
+  }, [authToken, authUser]);
 
   const fetchRequests = async () => {
     try {
+      if (!authToken) {
+        console.error('No auth token for teacher requests');
+        setLoading(false);
+        return;
+      }
+
       const [pendingRes, approvedRes] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/gate-pass/teacher/pending`, {
-          headers: { Authorization: `Bearer ${token}` },
+        fetch(`http://localhost:3001/api/gate-pass/teacher/pending`, {
+          headers: { Authorization: `Bearer ${authToken}` },
         }),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/gate-pass/teacher/approved`, {
-          headers: { Authorization: `Bearer ${token}` },
+        fetch(`http://localhost:3001/api/gate-pass/teacher/approved`, {
+          headers: { Authorization: `Bearer ${authToken}` },
         }),
       ]);
 
-      const pendingData = await pendingRes.json();
-      setPendingRequests(pendingData);
+      if (pendingRes.ok) {
+        const pendingData = await pendingRes.json();
+        console.log('Pending requests data:', pendingData);
+        setPendingRequests(Array.isArray(pendingData) ? pendingData : []);
+      } else {
+        console.error('Failed to fetch pending requests:', pendingRes.status);
+        setPendingRequests([]);
+      }
 
-      // For approved requests, you'll need to create this endpoint
-      // const approvedData = await approvedRes.json();
-      // setApprovedRequests(approvedData);
+      if (approvedRes.ok) {
+        const approvedData = await approvedRes.json();
+        console.log('Approved requests data:', approvedData);
+        setApprovedRequests(Array.isArray(approvedData) ? approvedData : []);
+      } else {
+        console.error('Failed to fetch approved requests:', approvedRes.status);
+        setApprovedRequests([]);
+      }
     } catch (error) {
       console.error('Error fetching requests:', error);
+      setPendingRequests([]);
+      setApprovedRequests([]);
     } finally {
       setLoading(false);
     }
@@ -92,7 +136,7 @@ export default function TeacherDashboard() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({ remarks }),
         },
@@ -101,7 +145,7 @@ export default function TeacherDashboard() {
       if (res.ok) {
         setSelectedRequest(null);
         setRemarks('');
-        fetchRequests();
+        fetchRequests(); // Refresh data after approval
       }
     } catch (error) {
       console.error('Error approving request:', error);
@@ -116,7 +160,7 @@ export default function TeacherDashboard() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${authToken}`,
           },
           body: JSON.stringify({ remarks }),
         },
@@ -125,7 +169,7 @@ export default function TeacherDashboard() {
       if (res.ok) {
         setSelectedRequest(null);
         setRemarks('');
-        fetchRequests();
+        fetchRequests(); // Refresh data after rejection
       }
     } catch (error) {
       console.error('Error rejecting request:', error);
